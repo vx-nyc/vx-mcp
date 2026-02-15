@@ -14,10 +14,27 @@ import {
 
 const VX_API_URL = process.env.VX_API_URL || "https://api.vx.dev";
 const VX_API_KEY = process.env.VX_API_KEY;
+const VX_NAME = process.env.VX_NAME || "VX";
+const VX_SOURCE = process.env.VX_SOURCE || detectSource();
 
 if (!VX_API_KEY) {
   console.error("Error: VX_API_KEY environment variable is required");
   process.exit(1);
+}
+
+// Detect source based on environment or common patterns
+function detectSource(): string {
+  // Check common MCP client indicators
+  const cwd = process.cwd();
+  const env = process.env;
+  
+  if (env.CURSOR_SESSION_ID || cwd.includes('cursor')) return 'cursor';
+  if (env.WINDSURF_SESSION || cwd.includes('windsurf')) return 'windsurf';
+  if (env.CLAUDE_DESKTOP || cwd.includes('Claude')) return 'claude';
+  if (env.VSCODE_PID || cwd.includes('vscode')) return 'vscode';
+  
+  // Default to MCP client name if available
+  return 'mcp';
 }
 
 // =============================================================================
@@ -213,10 +230,17 @@ async function handleVxStore(args: {
       context: args.context,
       memoryType: args.memoryType || "SEMANTIC",
       importance: args.importance ?? 0.5,
+      source: VX_SOURCE,
+      metadata: {
+        source: VX_SOURCE,
+        vxName: VX_NAME,
+        client: 'mcp-server',
+        version: '0.2.3'
+      }
     }),
   });
 
-  return `✓ Memory stored successfully (ID: ${memory.id})`;
+  return `✓ Memory stored by ${VX_NAME} (source: ${VX_SOURCE}, ID: ${memory.id})`;
 }
 
 async function handleVxQuery(args: {

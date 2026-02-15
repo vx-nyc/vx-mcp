@@ -1,6 +1,6 @@
 {
   "name": "@vesselnyc/mcp-server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Give your AI persistent memory. MCP server that connects Claude, Cursor, Windsurf, and VS Code to VX — your personal knowledge layer that remembers everything.",
   "main": "dist/index.js",
   "bin": {
