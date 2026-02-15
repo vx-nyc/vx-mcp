@@ -23,9 +23,7 @@
     "vscode",
     "llm",
     "rag",
-    "knowledge",
-    "vector",
-    "embeddings"
+    "knowledge"
   ],
   "author": "Vessel Tech Inc",
   "license": "MIT",

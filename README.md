@@ -7,9 +7,9 @@ Give your AI persistent memory. MCP server that connects Claude, Cursor, and oth
 
 ## Quick Start
 
-\`\`\`bash
+```bash
 npx @vesselnyc/mcp-server
-\`\`\`
+```
 
 ## Setup
 
@@ -17,7 +17,7 @@ npx @vesselnyc/mcp-server
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-\`\`\`json
+```json
 {
   "mcpServers": {
     "vx": {
@@ -30,7 +30,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
     }
   }
 }
-\`\`\`
+```
 
 ### Cursor / Windsurf / VS Code
 
