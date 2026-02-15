@@ -1,7 +1,7 @@
 {
   "name": "@vesselnyc/mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for VX Memory - give your AI tools persistent memory",
+  "description": "Give your AI persistent memory. MCP server that connects Claude, Cursor, and other AI tools to VX — your personal knowledge layer.",
   "main": "dist/index.js",
   "bin": {
     "vx-mcp": "./dist/index.js"
@@ -13,7 +13,20 @@
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["mcp", "ai", "memory", "context", "claude", "cursor", "vscode", "llm"],
+  "keywords": [
+    "mcp",
+    "ai",
+    "memory",
+    "context",
+    "claude",
+    "cursor",
+    "vscode",
+    "llm",
+    "rag",
+    "knowledge",
+    "vector",
+    "embeddings"
+  ],
   "author": "Vessel Tech Inc",
   "license": "MIT",
   "repository": {
@@ -21,6 +34,9 @@
     "url": "https://github.com/vx-nyc/vx-mcp"
   },
   "homepage": "https://vessel.nyc",
+  "bugs": {
+    "url": "https://github.com/vx-nyc/vx-mcp/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
   },
