@@ -1,10 +1,10 @@
 {
-  "name": "vx-mcp-server",
+  "name": "@vesselnyc/mcp-server",
   "version": "0.1.0",
   "description": "MCP server for VX Memory - give your AI tools persistent memory",
   "main": "dist/index.js",
   "bin": {
-    "vx-mcp-server": "./dist/index.js"
+    "vx-mcp": "./dist/index.js"
   },
   "type": "module",
   "scripts": {
@@ -13,21 +13,12 @@
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [
-    "mcp",
-    "ai",
-    "memory",
-    "context",
-    "claude",
-    "cursor",
-    "vscode",
-    "llm"
-  ],
+  "keywords": ["mcp", "ai", "memory", "context", "claude", "cursor", "vscode", "llm"],
   "author": "Vessel Tech Inc",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vx-nyc/vx-mcp-server"
+    "url": "https://github.com/vx-nyc/vx-mcp"
   },
   "homepage": "https://vessel.nyc",
   "dependencies": {
@@ -40,8 +31,5 @@
   "engines": {
     "node": ">=18"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ]
+  "files": ["dist", "README.md"]
 }
