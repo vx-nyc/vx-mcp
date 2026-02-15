@@ -1,7 +1,7 @@
 {
   "name": "@vesselnyc/mcp-server",
-  "version": "0.1.0",
-  "description": "Give your AI persistent memory. MCP server that connects Claude, Cursor, and other AI tools to VX — your personal knowledge layer.",
+  "version": "0.2.0",
+  "description": "Give your AI persistent memory. MCP server that connects Claude, Cursor, Windsurf, and VS Code to VX — your personal knowledge layer that remembers everything.",
   "main": "dist/index.js",
   "bin": {
     "vx-mcp": "./dist/index.js"
@@ -15,25 +15,51 @@
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
+    "modelcontextprotocol",
     "ai",
+    "ai-memory",
     "memory",
+    "persistent-memory",
     "context",
+    "context-window",
     "claude",
+    "claude-desktop",
     "cursor",
+    "windsurf",
     "vscode",
+    "continue",
     "llm",
     "rag",
-    "knowledge"
+    "retrieval",
+    "knowledge-base",
+    "knowledge-graph",
+    "embeddings",
+    "semantic-search",
+    "vector-database",
+    "long-term-memory",
+    "ai-tools",
+    "developer-tools",
+    "anthropic",
+    "openai",
+    "gpt"
   ],
-  "author": "Vessel Tech Inc",
+  "author": {
+    "name": "Vessel Tech Inc",
+    "url": "https://vessel.nyc"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vx-nyc/vx-mcp"
+    "url": "git+https://github.com/vx-nyc/vx-mcp.git"
   },
   "homepage": "https://vessel.nyc",
   "bugs": {
     "url": "https://github.com/vx-nyc/vx-mcp/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/vx-nyc"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
@@ -45,5 +71,8 @@
   "engines": {
     "node": ">=18"
   },
-  "files": ["dist", "README.md"]
+  "files": [
+    "dist",
+    "README.md"
+  ]
 }
