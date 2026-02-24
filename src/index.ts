@@ -1,81 +1,46 @@
 #!/usr/bin/env node
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+/**
+ * VX MCP Server
+ * Give your AI persistent memory.
+ * 
+ * @module @vesselnyc/mcp-server
+ * @see https://vessel.nyc
+ */
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
-} from "@modelcontextprotocol/sdk/types.js";
+} from '@modelcontextprotocol/sdk/types.js';
+
+import { VXClient, createClientFromEnv, detectSource } from './client.js';
+import { VXError } from './types.js';
+
+// Re-export types for library consumers
+export * from './types.js';
+export { VXClient, createClientFromEnv, detectSource } from './client.js';
 
 // =============================================================================
-// Configuration
+// Version & Configuration
 // =============================================================================
 
-const VX_API_URL = process.env.VX_API_URL || "https://api.vx.dev";
-const VX_API_KEY = process.env.VX_API_KEY;
-const VX_NAME = process.env.VX_NAME || "VX";
-const VX_SOURCE = process.env.VX_SOURCE || detectSource();
+const VERSION = '0.3.0';
+const VX_NAME = process.env.VX_NAME || 'VX';
 
-if (!VX_API_KEY) {
-  console.error("Error: VX_API_KEY environment variable is required");
-  process.exit(1);
-}
-
-// Detect source based on environment or common patterns
-function detectSource(): string {
-  // Check common MCP client indicators
-  const cwd = process.cwd();
-  const env = process.env;
-  
-  if (env.CURSOR_SESSION_ID || cwd.includes('cursor')) return 'cursor';
-  if (env.WINDSURF_SESSION || cwd.includes('windsurf')) return 'windsurf';
-  if (env.CLAUDE_DESKTOP || cwd.includes('Claude')) return 'claude';
-  if (env.VSCODE_PID || cwd.includes('vscode')) return 'vscode';
-  
-  // Default to MCP client name if available
-  return 'mcp';
-}
-
-// =============================================================================
-// VX API Client
-// =============================================================================
-
-interface Memory {
-  id: string;
-  content: string;
-  context?: string;
-  memoryType: string;
-  importance?: number;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-interface QueryResult {
-  memories: Memory[];
-  total: number;
-}
-
-async function vxFetch<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const url = `${VX_API_URL}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": VX_API_KEY!,
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`VX API error: ${response.status} - ${error}`);
+// Create client - will throw with helpful message if not configured
+let client: VXClient;
+try {
+  client = createClientFromEnv();
+} catch (error) {
+  if (error instanceof VXError) {
+    console.error(`Configuration Error: ${error.message}`);
+  } else {
+    console.error('Error:', error);
   }
-
-  return response.json();
+  process.exit(1);
 }
 
 // =============================================================================
@@ -84,131 +49,164 @@ async function vxFetch<T>(
 
 const tools: Tool[] = [
   {
-    name: "vx_store",
+    name: 'vx_store',
     description:
-      "Store a new memory in VX. Use this to save important information, facts, preferences, or anything the user might want to remember later.",
+      'Store a new memory in VX. Use this to save important information, facts, preferences, or anything the user might want to remember later.',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         content: {
-          type: "string",
-          description: "The content to store as a memory",
+          type: 'string',
+          description: 'The content to store as a memory',
         },
         context: {
-          type: "string",
+          type: 'string',
           description:
-            "Optional context path (e.g., 'work/projects', 'personal/preferences')",
+            'Optional context path (e.g., "work/projects", "personal/preferences")',
         },
         memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
+          type: 'string',
+          enum: ['SEMANTIC', 'EPISODIC', 'PROCEDURAL'],
           description:
-            "Type of memory: SEMANTIC (facts/knowledge), EPISODIC (events/experiences), PROCEDURAL (how-to/processes)",
-          default: "SEMANTIC",
+            'Type of memory: SEMANTIC (facts/knowledge), EPISODIC (events/experiences), PROCEDURAL (how-to/processes)',
+          default: 'SEMANTIC',
         },
         importance: {
-          type: "number",
+          type: 'number',
           minimum: 0,
           maximum: 1,
-          description: "Importance score from 0 to 1 (default: 0.5)",
+          description: 'Importance score from 0 to 1 (default: 0.5)',
         },
       },
-      required: ["content"],
+      required: ['content'],
     },
   },
   {
-    name: "vx_query",
+    name: 'vx_update',
     description:
-      "Search memories by semantic similarity. Use this to recall information, find relevant context, or answer questions about past conversations and stored knowledge.",
+      'Update an existing memory. Use this to modify the content, context, type, or importance of a previously stored memory.',
     inputSchema: {
-      type: "object",
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'The ID of the memory to update',
+        },
+        content: {
+          type: 'string',
+          description: 'New content for the memory',
+        },
+        context: {
+          type: 'string',
+          description: 'New context path',
+        },
+        memoryType: {
+          type: 'string',
+          enum: ['SEMANTIC', 'EPISODIC', 'PROCEDURAL'],
+          description: 'New memory type',
+        },
+        importance: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'New importance score',
+        },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'vx_query',
+    description:
+      'Search memories by semantic similarity. Use this to recall information, find relevant context, or answer questions about past conversations and stored knowledge.',
+    inputSchema: {
+      type: 'object',
       properties: {
         query: {
-          type: "string",
-          description: "Natural language query to search memories",
+          type: 'string',
+          description: 'Natural language query to search memories',
         },
         limit: {
-          type: "number",
-          description: "Maximum number of results to return (default: 10)",
+          type: 'number',
+          description: 'Maximum number of results to return (default: 10)',
           default: 10,
         },
         context: {
-          type: "string",
-          description: "Optional context path to filter results",
+          type: 'string',
+          description: 'Optional context path to filter results',
         },
         memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
-          description: "Filter by memory type",
+          type: 'string',
+          enum: ['SEMANTIC', 'EPISODIC', 'PROCEDURAL'],
+          description: 'Filter by memory type',
         },
       },
-      required: ["query"],
+      required: ['query'],
     },
   },
   {
-    name: "vx_list",
+    name: 'vx_list',
     description:
-      "List memories with optional filters. Use this to browse stored memories or find recent entries.",
+      'List memories with optional filters. Use this to browse stored memories or find recent entries.',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         limit: {
-          type: "number",
-          description: "Maximum number of results (default: 20)",
+          type: 'number',
+          description: 'Maximum number of results (default: 20)',
           default: 20,
         },
         offset: {
-          type: "number",
-          description: "Number of results to skip for pagination",
+          type: 'number',
+          description: 'Number of results to skip for pagination',
           default: 0,
         },
         context: {
-          type: "string",
-          description: "Filter by context path",
+          type: 'string',
+          description: 'Filter by context path',
         },
         memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
-          description: "Filter by memory type",
+          type: 'string',
+          enum: ['SEMANTIC', 'EPISODIC', 'PROCEDURAL'],
+          description: 'Filter by memory type',
         },
       },
     },
   },
   {
-    name: "vx_delete",
+    name: 'vx_delete',
     description:
-      "Delete a memory by ID. Use this when the user wants to remove specific information from their memory.",
+      'Delete a memory by ID. Use this when the user wants to remove specific information from their memory.',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         id: {
-          type: "string",
-          description: "The ID of the memory to delete",
+          type: 'string',
+          description: 'The ID of the memory to delete',
         },
       },
-      required: ["id"],
+      required: ['id'],
     },
   },
   {
-    name: "vx_context",
+    name: 'vx_context',
     description:
-      "Get a context packet with relevant memories for the current conversation. This automatically retrieves and formats memories that might be useful based on the conversation topic.",
+      'Get a context packet with relevant memories for the current conversation. This automatically retrieves and formats memories that might be useful based on the conversation topic.',
     inputSchema: {
-      type: "object",
+      type: 'object',
       properties: {
         topic: {
-          type: "string",
+          type: 'string',
           description:
-            "The current topic or question to get relevant context for",
+            'The current topic or question to get relevant context for',
         },
         maxTokens: {
-          type: "number",
-          description:
-            "Maximum tokens for the context packet (default: 4000)",
+          type: 'number',
+          description: 'Maximum tokens for the context packet (default: 4000)',
           default: 4000,
         },
       },
-      required: ["topic"],
+      required: ['topic'],
     },
   },
 ];
@@ -217,119 +215,126 @@ const tools: Tool[] = [
 // Tool Handlers
 // =============================================================================
 
-async function handleVxStore(args: {
+interface StoreArgs {
   content: string;
   context?: string;
-  memoryType?: string;
+  memoryType?: 'SEMANTIC' | 'EPISODIC' | 'PROCEDURAL';
   importance?: number;
-}): Promise<string> {
-  const memory = await vxFetch<Memory>("/v1/memories", {
-    method: "POST",
-    body: JSON.stringify({
-      content: args.content,
-      context: args.context,
-      memoryType: args.memoryType || "SEMANTIC",
-      importance: args.importance ?? 0.5,
-      source: VX_SOURCE,
-      metadata: {
-        source: VX_SOURCE,
-        vxName: VX_NAME,
-        client: 'mcp-server',
-        version: '0.2.3'
-      }
-    }),
-  });
-
-  return `✓ Memory stored by ${VX_NAME} (source: ${VX_SOURCE}, ID: ${memory.id})`;
 }
 
-async function handleVxQuery(args: {
+interface UpdateArgs {
+  id: string;
+  content?: string;
+  context?: string;
+  memoryType?: 'SEMANTIC' | 'EPISODIC' | 'PROCEDURAL';
+  importance?: number;
+}
+
+interface QueryArgs {
   query: string;
   limit?: number;
   context?: string;
-  memoryType?: string;
-}): Promise<string> {
-  const result = await vxFetch<QueryResult>("/v1/query", {
-    method: "POST",
-    body: JSON.stringify({
-      query: args.query,
-      limit: args.limit || 10,
-      context: args.context,
-      memoryType: args.memoryType,
-    }),
+  memoryType?: 'SEMANTIC' | 'EPISODIC' | 'PROCEDURAL';
+}
+
+interface ListArgs {
+  limit?: number;
+  offset?: number;
+  context?: string;
+  memoryType?: 'SEMANTIC' | 'EPISODIC' | 'PROCEDURAL';
+}
+
+interface DeleteArgs {
+  id: string;
+}
+
+interface ContextArgs {
+  topic: string;
+  maxTokens?: number;
+}
+
+async function handleVxStore(args: StoreArgs): Promise<string> {
+  const memory = await client.store({
+    content: args.content,
+    context: args.context,
+    memoryType: args.memoryType,
+    importance: args.importance,
+  });
+
+  return `✓ Memory stored by ${VX_NAME} (ID: ${memory.id}, type: ${memory.memoryType})`;
+}
+
+async function handleVxUpdate(args: UpdateArgs): Promise<string> {
+  const memory = await client.update({
+    id: args.id,
+    content: args.content,
+    context: args.context,
+    memoryType: args.memoryType,
+    importance: args.importance,
+  });
+
+  return `✓ Memory updated (ID: ${memory.id})`;
+}
+
+async function handleVxQuery(args: QueryArgs): Promise<string> {
+  const result = await client.query({
+    query: args.query,
+    limit: args.limit,
+    context: args.context,
+    memoryType: args.memoryType,
   });
 
   if (result.memories.length === 0) {
-    return "No relevant memories found.";
+    return 'No relevant memories found.';
   }
 
   const formatted = result.memories
     .map(
       (m, i) =>
-        `[${i + 1}] ${m.content}${m.context ? ` (context: ${m.context})` : ""}`
+        `[${i + 1}] ${m.content}${m.context ? ` (context: ${m.context})` : ''}`
     )
-    .join("\n\n");
+    .join('\n\n');
 
   return `Found ${result.memories.length} relevant memories:\n\n${formatted}`;
 }
 
-async function handleVxList(args: {
-  limit?: number;
-  offset?: number;
-  context?: string;
-  memoryType?: string;
-}): Promise<string> {
-  const params = new URLSearchParams();
-  if (args.limit) params.set("limit", args.limit.toString());
-  if (args.offset) params.set("offset", args.offset.toString());
-  if (args.context) params.set("context", args.context);
-  if (args.memoryType) params.set("memoryType", args.memoryType);
-
-  const result = await vxFetch<{ memories: Memory[]; total: number }>(
-    `/v1/memories?${params.toString()}`
-  );
+async function handleVxList(args: ListArgs): Promise<string> {
+  const result = await client.list({
+    limit: args.limit,
+    offset: args.offset,
+    context: args.context,
+    memoryType: args.memoryType,
+  });
 
   if (result.memories.length === 0) {
-    return "No memories found.";
+    return 'No memories found.';
   }
 
   const formatted = result.memories
     .map(
       (m, i) =>
         `[${i + 1}] (${m.id}) ${m.content.substring(0, 100)}${
-          m.content.length > 100 ? "..." : ""
+          m.content.length > 100 ? '...' : ''
         }`
     )
-    .join("\n");
+    .join('\n');
 
   return `Showing ${result.memories.length} of ${result.total} memories:\n\n${formatted}`;
 }
 
-async function handleVxDelete(args: { id: string }): Promise<string> {
-  await vxFetch(`/v1/memories/${args.id}`, {
-    method: "DELETE",
-  });
-
+async function handleVxDelete(args: DeleteArgs): Promise<string> {
+  await client.delete(args.id);
   return `✓ Memory deleted successfully (ID: ${args.id})`;
 }
 
-async function handleVxContext(args: {
-  topic: string;
-  maxTokens?: number;
-}): Promise<string> {
-  const result = await vxFetch<{ context: string; memoryCount: number }>(
-    "/v1/context-packet",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        query: args.topic,
-        maxTokens: args.maxTokens || 4000,
-      }),
-    }
-  );
+async function handleVxContext(args: ContextArgs): Promise<string> {
+  const result = await client.getContextPacket({
+    topic: args.topic,
+    maxTokens: args.maxTokens,
+  });
 
   if (!result.context || result.memoryCount === 0) {
-    return "No relevant context found for this topic.";
+    return 'No relevant context found for this topic.';
   }
 
   return `Context from ${result.memoryCount} memories:\n\n${result.context}`;
@@ -341,8 +346,8 @@ async function handleVxContext(args: {
 
 const server = new Server(
   {
-    name: "vx-memory",
-    version: "0.1.0",
+    name: 'vx-memory',
+    version: VERSION,
   },
   {
     capabilities: {
@@ -364,32 +369,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result: string;
 
     switch (name) {
-      case "vx_store":
-        result = await handleVxStore(args as Parameters<typeof handleVxStore>[0]);
+      case 'vx_store':
+        result = await handleVxStore(args as unknown as StoreArgs);
         break;
-      case "vx_query":
-        result = await handleVxQuery(args as Parameters<typeof handleVxQuery>[0]);
+      case 'vx_update':
+        result = await handleVxUpdate(args as unknown as UpdateArgs);
         break;
-      case "vx_list":
-        result = await handleVxList(args as Parameters<typeof handleVxList>[0]);
+      case 'vx_query':
+        result = await handleVxQuery(args as unknown as QueryArgs);
         break;
-      case "vx_delete":
-        result = await handleVxDelete(args as Parameters<typeof handleVxDelete>[0]);
+      case 'vx_list':
+        result = await handleVxList((args ?? {}) as unknown as ListArgs);
         break;
-      case "vx_context":
-        result = await handleVxContext(args as Parameters<typeof handleVxContext>[0]);
+      case 'vx_delete':
+        result = await handleVxDelete(args as unknown as DeleteArgs);
+        break;
+      case 'vx_context':
+        result = await handleVxContext(args as unknown as ContextArgs);
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
 
     return {
-      content: [{ type: "text", text: result }],
+      content: [{ type: 'text', text: result }],
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    let message: string;
+    
+    if (error instanceof VXError) {
+      message = `${error.code}: ${error.message}`;
+      if (error.retryable) {
+        message += ' (this error may be temporary, please try again)';
+      }
+    } else {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
     return {
-      content: [{ type: "text", text: `Error: ${message}` }],
+      content: [{ type: 'text', text: `Error: ${message}` }],
       isError: true,
     };
   }
@@ -402,10 +420,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("VX MCP Server running on stdio");
+  console.error(`VX MCP Server v${VERSION} running on stdio`);
 }
 
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  console.error('Fatal error:', error);
   process.exit(1);
 });
