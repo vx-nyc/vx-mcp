@@ -3,3 +3,9 @@ dist/
 *.tgz
 .DS_Store
 *.log
+certs/*.pem
+.env
+.env.*
+!.env.example
+!test/.env.e2e.example
+test/.env.e2e
