@@ -1,0 +1,247 @@
+/**
+ * E2E test: MCP server + SDK against a real VX API only (no mock server).
+ * Loads test/.env.e2e if VX_BEARER_TOKEN/VX_API_KEY are not set.
+ * If no credentials or server unreachable: skips and exits 0.
+ * For full e2e: start VX (e.g. docker compose --profile dev in vx) and set credentials.
+ */
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { createVxClient, importFromText } from "@vx/sdk";
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+function loadTestEnv(): void {
+  if (process.env.VX_BEARER_TOKEN || process.env.VX_API_KEY) return;
+  const envPath = path.join(process.cwd(), "test", ".env.e2e");
+  if (!fs.existsSync(envPath)) return;
+  const content = fs.readFileSync(envPath, "utf8");
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith("#")) {
+      const idx = trimmed.indexOf("=");
+      if (idx > 0) {
+        const key = trimmed.slice(0, idx).trim();
+        const value = trimmed.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
+        process.env[key] = value;
+      }
+    }
+  }
+}
+loadTestEnv();
+
+const VX_API_BASE_URL =
+  process.env.VX_API_BASE_URL || process.env.VX_API_URL || "http://localhost:3000/v1";
+const VX_API_KEY = process.env.VX_API_KEY;
+const VX_BEARER_TOKEN = process.env.VX_BEARER_TOKEN;
+const auth = VX_BEARER_TOKEN ? { bearerToken: VX_BEARER_TOKEN } : VX_API_KEY ? { apiKey: VX_API_KEY } : null;
+
+async function ensureBuilt(): Promise<void> {
+  const distIndex = path.join(process.cwd(), "dist", "index.js");
+  if (!fs.existsSync(distIndex)) {
+    console.error("dist/index.js not found. Run: npm run build");
+    process.exit(1);
+  }
+}
+
+async function runSdkSmoke(): Promise<boolean> {
+  if (!auth) {
+    console.log("Skipping SDK smoke: no VX_API_KEY or VX_BEARER_TOKEN.");
+    return false;
+  }
+  const client = createVxClient({
+    apiBaseUrl: VX_API_BASE_URL,
+    ...auth,
+  });
+  const id = `e2e-${Date.now()}`;
+  const content = `E2E smoke memory ${id}`;
+  const memory = await client.createMemory({
+    content,
+    context: "e2e/smoke",
+    memoryType: "SEMANTIC",
+  });
+  console.log("SDK createMemory:", memory.id);
+  const result = await client.queryMemories({ query: "E2E smoke", limit: 5 });
+  const found = result.memories.some((m) => m.id === memory.id);
+  if (!found) throw new Error("SDK smoke: created memory not found in query");
+  console.log("SDK smoke: create + query OK");
+
+  const importId = `e2e-sdk-import-${Date.now()}`;
+  const importResult = await importFromText(client, `SDK import smoke content ${importId}`, {
+    defaultContext: "e2e/sdk",
+    memoryType: "SEMANTIC",
+  });
+  if (importResult.created < 1) throw new Error("SDK smoke: importFromText created no memories");
+  const importQuery = await client.queryMemories({ query: importId, limit: 5 });
+  const importFound = importQuery.memories.some((m) => m.content.includes(importId));
+  if (!importFound) throw new Error("SDK smoke: import text not found in query");
+  console.log("SDK smoke: importFromText + query OK");
+  return true;
+}
+
+async function runMcpE2e(): Promise<boolean> {
+  if (!auth) {
+    console.log("Skipping MCP e2e: no VX_API_KEY or VX_BEARER_TOKEN.");
+    return false;
+  }
+
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [path.join(process.cwd(), "dist", "index.js")],
+    env: {
+      ...process.env,
+      VX_API_BASE_URL,
+      ...(VX_BEARER_TOKEN ? { VX_BEARER_TOKEN } : {}),
+      ...(VX_API_KEY ? { VX_API_KEY } : {}),
+    },
+  });
+
+  const client = new Client(
+    { name: "vx-mcp-e2e", version: "0.2.0" },
+    { capabilities: {} }
+  );
+
+  await client.connect(transport);
+
+  const listRes = await client.listTools();
+  const toolNames = listRes.tools.map((t) => t.name);
+  const required = ["vx_store", "vx_recall", "vx_query", "vx_list", "vx_delete", "vx_context", "vx_import_text", "vx_import_batch"];
+  for (const name of required) {
+    if (!toolNames.includes(name)) throw new Error(`Missing tool: ${name}`);
+  }
+  console.log("MCP ListTools OK:", toolNames.length, "tools");
+
+  const unique = `e2e-mcp-${Date.now()}`;
+  const storeRes = await client.callTool({
+    name: "vx_store",
+    arguments: {
+      content: unique,
+      context: "e2e/mcp",
+      memoryType: "SEMANTIC",
+    },
+  });
+  if (storeRes.isError) throw new Error(`vx_store failed: ${storeRes.content?.[0]?.type === "text" ? (storeRes.content[0] as { text: string }).text : storeRes}`);
+  const storeText = (storeRes.content?.[0] as { text?: string })?.text ?? "";
+  const idMatch = storeText.match(/ID:\s*([^\s)]+)/);
+  const memoryId = idMatch ? idMatch[1]!.trim() : null;
+  if (!memoryId) throw new Error("vx_store did not return memory ID");
+  console.log("MCP vx_store OK, id:", memoryId);
+
+  const queryRes = await client.callTool({
+    name: "vx_query",
+    arguments: { query: unique, limit: 5 },
+  });
+  if (queryRes.isError) throw new Error(`vx_query failed: ${(queryRes.content?.[0] as { text?: string })?.text}`);
+  const queryText = (queryRes.content?.[0] as { text?: string })?.text ?? "";
+  if (!queryText.includes(unique)) throw new Error("vx_query did not return stored memory");
+  console.log("MCP vx_query OK");
+
+  const recallRes = await client.callTool({
+    name: "vx_recall",
+    arguments: { query: unique, limit: 5 },
+  });
+  if (recallRes.isError) throw new Error(`vx_recall failed: ${(recallRes.content?.[0] as { text?: string })?.text}`);
+  const recallText = (recallRes.content?.[0] as { text?: string })?.text ?? "";
+  if (!recallText.includes(unique)) throw new Error("vx_recall did not return stored memory");
+  console.log("MCP vx_recall OK");
+
+  const listRes2 = await client.callTool({
+    name: "vx_list",
+    arguments: { limit: 20, context: "e2e/mcp" },
+  });
+  if (listRes2.isError) throw new Error(`vx_list failed: ${(listRes2.content?.[0] as { text?: string })?.text}`);
+  const listText = (listRes2.content?.[0] as { text?: string })?.text ?? "";
+  if (!listText.includes(memoryId)) throw new Error("vx_list did not include stored memory");
+  console.log("MCP vx_list OK");
+
+  const importUnique = `e2e-import-${Date.now()}`;
+  const importTextRes = await client.callTool({
+    name: "vx_import_text",
+    arguments: { text: `First chunk. ${importUnique} second chunk.`, context: "e2e/import", memoryType: "SEMANTIC" },
+  });
+  if (importTextRes.isError) throw new Error(`vx_import_text failed: ${(importTextRes.content?.[0] as { text?: string })?.text}`);
+  console.log("MCP vx_import_text OK");
+
+  const batchUnique = `e2e-batch-${Date.now()}`;
+  const importBatchRes = await client.callTool({
+    name: "vx_import_batch",
+    arguments: {
+      memories: [
+        { content: `Batch A ${batchUnique}`, context: "e2e/batch", memoryType: "SEMANTIC" },
+        { content: `Batch B ${batchUnique}`, context: "e2e/batch", memoryType: "SEMANTIC" },
+      ],
+    },
+  });
+  if (importBatchRes.isError) throw new Error(`vx_import_batch failed: ${(importBatchRes.content?.[0] as { text?: string })?.text}`);
+  const queryImportRes = await client.callTool({
+    name: "vx_query",
+    arguments: { query: importUnique, limit: 5 },
+  });
+  if (queryImportRes.isError) throw new Error(`vx_query after import_text failed`);
+  const queryImportText = (queryImportRes.content?.[0] as { text?: string })?.text ?? "";
+  if (!queryImportText.includes(importUnique)) throw new Error("vx_query did not return import_text memory");
+  const queryBatchRes = await client.callTool({
+    name: "vx_query",
+    arguments: { query: batchUnique, limit: 5 },
+  });
+  if (queryBatchRes.isError) throw new Error(`vx_query after import_batch failed`);
+  const queryBatchText = (queryBatchRes.content?.[0] as { text?: string })?.text ?? "";
+  if (!queryBatchText.includes("Batch A") || !queryBatchText.includes("Batch B")) throw new Error("vx_query did not return import_batch memories");
+  console.log("MCP vx_import_batch OK");
+
+  const contextRes = await client.callTool({
+    name: "vx_context",
+    arguments: { topic: "e2e mcp test" },
+  });
+  if (contextRes.isError) throw new Error(`vx_context failed: ${(contextRes.content?.[0] as { text?: string })?.text}`);
+  console.log("MCP vx_context OK");
+
+  const deleteRes = await client.callTool({
+    name: "vx_delete",
+    arguments: { id: memoryId },
+  });
+  if (deleteRes.isError) throw new Error(`vx_delete failed: ${(deleteRes.content?.[0] as { text?: string })?.text}`);
+  console.log("MCP vx_delete OK");
+
+  const queryAfter = await client.callTool({
+    name: "vx_query",
+    arguments: { query: unique, limit: 5 },
+  });
+  if (queryAfter.isError) throw new Error(`vx_query after delete failed`);
+  const afterText = (queryAfter.content?.[0] as { text?: string })?.text ?? "";
+  if (afterText.includes(unique)) throw new Error("vx_query still returned deleted memory");
+  console.log("MCP e2e: deleted memory no longer in query OK");
+
+  await transport.close();
+  return true;
+}
+
+async function main() {
+  await ensureBuilt();
+  if (!auth) {
+    console.log("E2E skipped: no VX API credentials. Set VX_BEARER_TOKEN or VX_API_KEY and VX_API_BASE_URL to run against a real VX API.");
+    process.exit(0);
+  }
+  const baseUrl = VX_API_BASE_URL.replace(/\/v1\/?$/, "");
+  let reachable = false;
+  try {
+    const res = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
+    reachable = res.ok;
+  } catch {
+    // ignore
+  }
+  if (!reachable) {
+    console.log("E2E skipped: VX API not reachable at", baseUrl, "- start the API (e.g. docker compose --profile dev in vx) to run e2e.");
+    process.exit(0);
+  }
+  console.log("E2E: SDK smoke...");
+  await runSdkSmoke();
+  console.log("E2E: MCP client...");
+  await runMcpE2e();
+  console.log("E2E completed successfully.");
+}
+
+main().catch((err) => {
+  console.error("E2E failed:", err);
+  process.exit(1);
+});
