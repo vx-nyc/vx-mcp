@@ -434,6 +434,30 @@ If the agent (or you) see only `plugin-*` MCP servers and **"vx" is not in the l
   That means Cursor **tore down** the VX MCP client when `mcp.json` was edited (e.g. when we added `VX_SOURCE` / `VX_CUSTODIAN_ID`) and did **not** automatically reconnect it in the current session.
 - **Fix:** **Restart Cursor** (quit and reopen), or use **Developer: Reload Window** so Cursor re-reads `mcp.json` and starts the VX server again. After that, the "vx" server should appear for the agent. No change to your config is required; it just needs a fresh connection.
 
+### VX not showing in MCP shortcuts / tools list
+
+There is **no separate “MCP shortcuts” configuration**. The shortcuts (or tools list) are filled from whatever MCP servers are connected. If VX doesn’t appear there, the server isn’t connected or isn’t starting.
+
+**Cursor**
+
+- **Config location:** Cursor can ignore project-level `.cursor/mcp.json`. Use **global** config so the server always loads: `~/.cursor/mcp.json`. Put the same `mcpServers.vx` block there (command, args, env). If you keep project-only config, open the project that contains `.cursor/mcp.json` and restart Cursor from that workspace.
+- **Where to look:** Open **Settings** (Cmd+Shift+J) → **Tools & MCP**. VX should appear in the list; turn its toggle **on**. The tools list at the top of the chat panel shows tools from servers that are connected and enabled.
+- **Restart:** After adding or changing `mcp.json`, **fully quit and reopen Cursor** (not just Reload Window). Config is read at startup.
+- **Build:** If you use the local path to `vx-mcp/dist/index.js`, run `cd /path/to/vx-mcp && npm run build` so `dist/index.js` exists.
+- **Logs:** **Output** (Cmd+Shift+U) → **MCP Logs**. If VX fails to start, you’ll see errors (e.g. missing file, Node version, or env). Fix those and restart.
+
+**Codex**
+
+- **Config:** Codex uses **`~/.codex/config.toml`** only (it does not use Cursor’s `mcp.json`). Ensure a `[mcp_servers.vx]` block with `command`, `args`, and `[mcp_servers.vx.env]` is present. See the [Cursor](#cursor) section above for the same env vars (e.g. `VX_API_BASE_URL`, `VX_BEARER_TOKEN`, `VX_SOURCE`, `VX_CUSTODIAN_ID`).
+- **Where to look:** **Settings** (Cmd+,) → **Integrations & MCP**. VX should be listed there. In the CLI TUI, type **`/mcp`** to see configured MCP servers.
+- **Restart:** After editing `config.toml`, **restart the Codex app** (or reload the window) so it reloads config and starts VX.
+- **Build:** If `args` point at `vx-mcp/dist/index.js`, run `npm run build` in the vx-mcp repo first.
+
+**Both**
+
+- Avoid **spaces in paths** (e.g. in `command` or `args`); some hosts misbehave when paths contain spaces.
+- Ensure **Node 18+** is used to run the server (e.g. set `nvm alias default 22` or use a full path to a Node 18+ binary in `command`).
+
 ### "There was an error connecting to the MCP server. Please check your server URL and make sure your server handles auth correctly."
 
 - **Server URL:** Use the exact URL where the MCP server is running. For local HTTPS: `https://localhost:3100`. From another device on WiFi: `https://YOUR_DEVICE_IP:3100` (no path; the client may append `/message` or similar).
