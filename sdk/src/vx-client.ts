@@ -360,6 +360,10 @@ export class VxApiClient {
     return envelope.data;
   }
 
+  async requestJson<T>(path: string, init: RequestInit): Promise<T> {
+    return this.request<T>(path, init);
+  }
+
   /**
    * Upload a single media file as a memory. Uses POST /multimodal/upload (multipart).
    * Requires VX multimodal module to be enabled.
@@ -618,4 +622,3 @@ export class VxApiClient {
 export function createVxClient(config: VxClientConfig): VxApiClient {
   return new VxApiClient(config);
 }
-
