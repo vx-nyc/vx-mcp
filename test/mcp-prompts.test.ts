@@ -36,7 +36,7 @@ describe("MCP prompt support", () => {
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client(
-      { name: "vx-mcp-tests", version: "0.5.0" },
+      { name: "vx-mcp-tests", version: "0.5.1" },
       { capabilities: { prompts: {} } }
     );
 

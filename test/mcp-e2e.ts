@@ -97,7 +97,7 @@ async function runMcpE2e(): Promise<boolean> {
   });
 
   const client = new Client(
-    { name: "vx-mcp-e2e", version: "0.5.0" },
+    { name: "vx-mcp-e2e", version: "0.5.1" },
     { capabilities: {} }
   );
 
