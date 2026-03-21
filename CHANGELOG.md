@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-03-20
+
+### Changed
+- Release metadata cleanup.
+
+## [0.5.1] - 2026-03-20
+
+### Changed
+- Updated Claude plugin marketplace copy from "Persistent VX memory" to "VX Universal memory".
+
+## [0.5.0] - 2026-03-20
+
+### Added
+- Plugin-first install flows for Claude Code, Codex, and OpenClaw.
+- MCP prompt support with `vx_memory_workflow` and `vx_memory_import`.
+- Native OpenClaw plugin tools plus `vx_status` for setup verification.
+- Knowledge-context tools: `vx_contexts_list` and `vx_contexts_create`.
+- Bundled Claude, Codex, and OpenClaw skill guidance aligned to the same public VX workflow.
+- Release-readiness coverage for installers, prompts, OpenClaw config/runtime, README consistency, and runtime config normalization.
+
+### Changed
+- Claude and Codex adapters now register the packaged server as `npx -y @vesselnyc/mcp-server@latest mcp`.
+- Host source tags are now specific to the integration, including `claude-code`, `claude-desktop`, `codex`, and `openclaw`.
+- `VX_API_BASE_URL` is now the canonical config output for new installs and docs, while `VX_API_URL` remains a backward-compatible runtime fallback.
+- Shared VX tool execution now flows through one runtime path used by both MCP and OpenClaw integrations.
+- README rewritten around user-oriented install steps and continuity benefits instead of internal implementation detail.
+
 ## [0.1.0] - 2026-02-15
 
 ### Added

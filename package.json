@@ -1,7 +1,7 @@
 {
   "name": "@vesselnyc/mcp-server",
-  "version": "0.2.1",
-  "description": "Give your AI persistent memory. MCP server that connects Claude, Cursor, Windsurf, and VS Code to VX — your personal knowledge layer that remembers everything.",
+  "version": "0.5.2",
+  "description": "Plugin-first VX memory for Claude, Codex, OpenClaw, and other MCP clients.",
   "main": "dist/index.js",
   "bin": {
     "vx-mcp": "./dist/index.js"
@@ -29,6 +29,8 @@
     "memory",
     "persistent-memory",
     "context",
+    "codex",
+    "openclaw",
     "context-window",
     "claude",
     "claude-desktop",
@@ -86,6 +88,14 @@
   },
   "files": [
     "dist",
-    "README.md"
-  ]
+    "skills",
+    ".claude-plugin",
+    "README.md",
+    "openclaw.plugin.json"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./dist/openclaw.js"
+    ]
+  }
 }

@@ -6,8 +6,11 @@ import {
   importFromText,
   importMemories,
   type CreateMemoryInput,
+  type CreateContextInput,
   type QueryResponse,
+  type VxKnowledgeContext,
 } from "@vx/sdk";
+import { VX_MCP_SERVER_VERSION } from "./constants.js";
 
 export type VxMemoryType =
   | "SEMANTIC"
@@ -20,17 +23,36 @@ export type VxMemoryType =
 export type VxClientLike = {
   createMemory(input: CreateMemoryInput): Promise<{ id: string; content: string; context?: string; memoryType?: string }>;
   createMemoriesBatch?(memories: CreateMemoryInput[]): Promise<{ created: number; memories: unknown[]; errors?: Array<{ index: number; error: string }> }>;
+  createContext?(input: CreateContextInput): Promise<VxKnowledgeContext>;
+  getContext?(name: string): Promise<VxKnowledgeContext>;
+  listContexts?(params?: { prefix?: string; includeStats?: boolean; limit?: number; offset?: number }): Promise<{ contexts: VxKnowledgeContext[]; total: number; limit: number; offset: number }>;
   queryMemories(input: { query: string; limit?: number; contexts?: string[]; memoryTypes?: VxMemoryType[]; minScore?: number }): Promise<QueryResponse>;
   listMemories?(params?: { limit?: number; offset?: number; context?: string; memoryType?: string }): Promise<{ memories: { id: string; content: string; context?: string }[]; total: number; hasMore: boolean }>;
   queryHybrid(input: { query: string; limit?: number; contexts?: string[]; memoryTypes?: string[]; minScore?: number }): Promise<QueryResponse | { data: QueryResponse }>;
-  buildContextPacket(input: { query: string; maxTokens?: number }): Promise<{ formatted: string; memoriesUsed: number }>;
+  buildContextPacket(input: { query: string; contexts?: string[]; maxTokens?: number }): Promise<{ formatted: string; memoriesUsed: number }>;
   deleteMemory(id: string): Promise<void>;
 };
+
+function formatContextCount(context: VxKnowledgeContext): string | null {
+  const count = context.memory_count ?? context.memoryCount;
+  return typeof count === "number" ? `memories: ${count}` : null;
+}
+
+function formatContextTimestamp(context: VxKnowledgeContext): string | null {
+  const timestamp =
+    context.last_updated ??
+    context.lastUpdated ??
+    context.updated_at ??
+    context.updatedAt ??
+    context.created_at ??
+    context.createdAt;
+  return timestamp ? `updated: ${timestamp}` : null;
+}
 
 export async function handleVxStore(
   client: VxClientLike,
   args: { content: string; context?: string; memoryType?: string; importance?: number },
-  meta: { source: string; name: string }
+  meta: { source: string; name: string; client?: string }
 ): Promise<string> {
   const input: CreateMemoryInput = {
     content: args.content,
@@ -40,8 +62,8 @@ export async function handleVxStore(
     metadata: {
       source: meta.source,
       vxName: meta.name,
-      client: "mcp-server",
-      version: "0.2.3",
+      client: meta.client ?? "mcp-server",
+      version: VX_MCP_SERVER_VERSION,
     },
   };
   if (typeof args.importance === "number") {
@@ -53,13 +75,13 @@ export async function handleVxStore(
 
 export async function handleVxQuery(
   client: VxClientLike,
-  args: { query: string; limit?: number; context?: string; memoryType?: string }
+  args: { query: string; limit?: number; context?: string; contexts?: string[]; memoryType?: string }
 ): Promise<string> {
   const memoryTypes = args.memoryType ? [args.memoryType as VxMemoryType] : undefined;
   const result = await client.queryMemories({
     query: args.query,
     limit: args.limit ?? 10,
-    contexts: args.context ? [args.context] : undefined,
+    contexts: args.contexts?.length ? args.contexts : args.context ? [args.context] : undefined,
     memoryTypes,
   });
   if (result.memories.length === 0) return "No relevant memories found.";
@@ -131,20 +153,73 @@ export async function handleVxDelete(client: VxClientLike, args: { id: string })
 
 export async function handleVxContext(
   client: VxClientLike,
-  args: { topic: string; maxTokens?: number }
+  args: { topic: string; contexts?: string[]; maxTokens?: number }
 ): Promise<string> {
   const packet = await client.buildContextPacket({
     query: args.topic,
+    contexts: args.contexts,
     maxTokens: args.maxTokens ?? 4000,
   });
   if (!packet.formatted || packet.memoriesUsed === 0) return "No relevant context found for this topic.";
   return `Context from ${packet.memoriesUsed} memories:\n\n${packet.formatted}`;
 }
 
+export async function handleVxContextsList(
+  client: VxClientLike,
+  args: { prefix?: string; includeStats?: boolean; limit?: number; offset?: number }
+): Promise<string> {
+  if (!client.listContexts) {
+    throw new Error("VX knowledge contexts are not supported by this client.");
+  }
+
+  const result = await client.listContexts({
+    prefix: args.prefix,
+    includeStats: args.includeStats ?? true,
+    limit: args.limit ?? 50,
+    offset: args.offset ?? 0,
+  });
+
+  if (result.contexts.length === 0) {
+    return "No knowledge contexts found.";
+  }
+
+  const formatted = result.contexts
+    .map((context, index) => {
+      const detailParts = [
+        context.description,
+        formatContextCount(context),
+        formatContextTimestamp(context),
+      ].filter(Boolean);
+      return `[${index + 1}] ${context.name}${detailParts.length ? ` — ${detailParts.join(" · ")}` : ""}`;
+    })
+    .join("\n");
+
+  return `Showing ${result.contexts.length} of ${result.total} knowledge contexts:\n\n${formatted}`;
+}
+
+export async function handleVxContextsCreate(
+  client: VxClientLike,
+  args: { name: string; description?: string; settings?: Record<string, unknown>; scope?: string }
+): Promise<string> {
+  if (!client.createContext) {
+    throw new Error("VX knowledge contexts are not supported by this client.");
+  }
+
+  const created = await client.createContext({
+    name: args.name,
+    description: args.description,
+    settings: args.settings,
+    scope: args.scope,
+  });
+
+  const detailParts = [created.description, formatContextCount(created)].filter(Boolean);
+  return `✓ Knowledge context created: ${created.name}${detailParts.length ? ` (${detailParts.join(" · ")})` : ""}`;
+}
+
 export async function handleVxImportText(
   client: VxClientLike,
   args: { text: string; context?: string; memoryType?: string; maxChunkChars?: number },
-  _meta: { source: string; name: string }
+  _meta: { source: string; name: string; client?: string }
 ): Promise<string> {
   const result = await importFromText(client as Parameters<typeof importFromText>[0], args.text, {
     defaultContext: args.context ?? "import",
@@ -160,7 +235,7 @@ export async function handleVxImportBatch(
   args: {
     memories: Array<{ content: string; context?: string; memoryType?: string; importance?: number }>;
   },
-  meta: { source: string; name: string }
+  meta: { source: string; name: string; client?: string }
 ): Promise<string> {
   const inputs: CreateMemoryInput[] = (args.memories ?? []).map((m) => ({
     content: m.content,
@@ -170,8 +245,8 @@ export async function handleVxImportBatch(
     metadata: {
       source: meta.source,
       vxName: meta.name,
-      client: "mcp-server",
-      version: "0.2.3",
+      client: meta.client ?? "mcp-server",
+      version: VX_MCP_SERVER_VERSION,
       ...(typeof m.importance === "number" ? { importance: m.importance } : {}),
     },
   }));

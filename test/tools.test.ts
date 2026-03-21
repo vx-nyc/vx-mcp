@@ -6,6 +6,8 @@
 import { describe, it, expect, vi } from "vitest";
 import type { VxClientLike } from "../src/handlers.js";
 import {
+  handleVxContextsCreate,
+  handleVxContextsList,
   handleVxStore,
   handleVxQuery,
   handleVxRecall,
@@ -21,6 +23,24 @@ const meta = { source: "test", name: "TestVX" };
 function createMockClient(overrides: Partial<VxClientLike> = {}): VxClientLike {
   return {
     createMemory: vi.fn().mockResolvedValue({ id: "mem-1", content: "x", context: "ctx", memoryType: "SEMANTIC" }),
+    createContext: vi.fn().mockResolvedValue({
+      name: "work/project-alpha",
+      description: "Project Alpha",
+      memory_count: 0,
+    }),
+    listContexts: vi.fn().mockResolvedValue({
+      contexts: [
+        {
+          name: "work/project-alpha",
+          description: "Project Alpha",
+          memory_count: 2,
+          last_updated: "2026-03-20T00:00:00Z",
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    }),
     queryMemories: vi.fn().mockResolvedValue({
       memories: [{ id: "mem-1", content: "hello world", context: "e2e", memoryType: "semantic", score: 0.9 }],
       total: 1,
@@ -63,9 +83,17 @@ describe("MCP tool handlers", () => {
 
   it("vx_query calls queryMemories and returns formatted list", async () => {
     const client = createMockClient();
-    const out = await handleVxQuery(client, { query: "hello", limit: 5 });
+    const out = await handleVxQuery(client, {
+      query: "hello",
+      limit: 5,
+      contexts: ["work/project-alpha", "work/project-beta"],
+    });
     expect(client.queryMemories).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "hello", limit: 5 })
+      expect.objectContaining({
+        query: "hello",
+        limit: 5,
+        contexts: ["work/project-alpha", "work/project-beta"],
+      })
     );
     expect(out).toContain("Found 1 relevant memories");
     expect(out).toContain("hello world");
@@ -109,9 +137,17 @@ describe("MCP tool handlers", () => {
 
   it("vx_context calls buildContextPacket and returns formatted context", async () => {
     const client = createMockClient();
-    const out = await handleVxContext(client, { topic: "testing", maxTokens: 4000 });
+    const out = await handleVxContext(client, {
+      topic: "testing",
+      contexts: ["work/project-alpha"],
+      maxTokens: 4000,
+    });
     expect(client.buildContextPacket).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "testing", maxTokens: 4000 })
+      expect.objectContaining({
+        query: "testing",
+        contexts: ["work/project-alpha"],
+        maxTokens: 4000,
+      })
     );
     expect(out).toContain("Context from 2 memories");
     expect(out).toContain("Context line 1");
@@ -153,5 +189,37 @@ describe("MCP tool handlers", () => {
       meta
     );
     expect(out).toContain("Imported 2 of 2 memories into VX");
+  });
+
+  it("vx_contexts_list returns formatted knowledge contexts", async () => {
+    const client = createMockClient();
+    const out = await handleVxContextsList(client, {
+      prefix: "work/",
+      includeStats: true,
+    });
+
+    expect(client.listContexts).toHaveBeenCalledWith(
+      expect.objectContaining({ prefix: "work/", includeStats: true })
+    );
+    expect(out).toContain("knowledge contexts");
+    expect(out).toContain("work/project-alpha");
+    expect(out).toContain("Project Alpha");
+  });
+
+  it("vx_contexts_create creates a knowledge context", async () => {
+    const client = createMockClient();
+    const out = await handleVxContextsCreate(client, {
+      name: "work/project-alpha",
+      description: "Project Alpha",
+    });
+
+    expect(client.createContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "work/project-alpha",
+        description: "Project Alpha",
+      })
+    );
+    expect(out).toContain("Knowledge context created");
+    expect(out).toContain("work/project-alpha");
   });
 });

@@ -97,7 +97,7 @@ async function runMcpE2e(): Promise<boolean> {
   });
 
   const client = new Client(
-    { name: "vx-mcp-e2e", version: "0.2.0" },
+    { name: "vx-mcp-e2e", version: "0.5.2" },
     { capabilities: {} }
   );
 
@@ -105,7 +105,18 @@ async function runMcpE2e(): Promise<boolean> {
 
   const listRes = await client.listTools();
   const toolNames = listRes.tools.map((t) => t.name);
-  const required = ["vx_store", "vx_recall", "vx_query", "vx_list", "vx_delete", "vx_context", "vx_import_text", "vx_import_batch"];
+  const required = [
+    "vx_store",
+    "vx_recall",
+    "vx_query",
+    "vx_list",
+    "vx_delete",
+    "vx_context",
+    "vx_contexts_list",
+    "vx_contexts_create",
+    "vx_import_text",
+    "vx_import_batch",
+  ];
   for (const name of required) {
     if (!toolNames.includes(name)) throw new Error(`Missing tool: ${name}`);
   }
@@ -154,6 +165,25 @@ async function runMcpE2e(): Promise<boolean> {
   if (!listText.includes(memoryId)) throw new Error("vx_list did not include stored memory");
   console.log("MCP vx_list OK");
 
+  const contextName = `e2e/context-${Date.now()}`;
+  const createContextRes = await client.callTool({
+    name: "vx_contexts_create",
+    arguments: {
+      name: contextName,
+      description: "E2E context",
+    },
+  });
+  if (createContextRes.isError) throw new Error(`vx_contexts_create failed: ${(createContextRes.content?.[0] as { text?: string })?.text}`);
+
+  const listContextsRes = await client.callTool({
+    name: "vx_contexts_list",
+    arguments: { prefix: "e2e/" },
+  });
+  if (listContextsRes.isError) throw new Error(`vx_contexts_list failed: ${(listContextsRes.content?.[0] as { text?: string })?.text}`);
+  const listContextsText = (listContextsRes.content?.[0] as { text?: string })?.text ?? "";
+  if (!listContextsText.includes(contextName)) throw new Error("vx_contexts_list did not include created context");
+  console.log("MCP vx_contexts_create + vx_contexts_list OK");
+
   const importUnique = `e2e-import-${Date.now()}`;
   const importTextRes = await client.callTool({
     name: "vx_import_text",
@@ -191,7 +221,7 @@ async function runMcpE2e(): Promise<boolean> {
 
   const contextRes = await client.callTool({
     name: "vx_context",
-    arguments: { topic: "e2e mcp test" },
+    arguments: { topic: "e2e mcp test", contexts: [contextName] },
   });
   if (contextRes.isError) throw new Error(`vx_context failed: ${(contextRes.content?.[0] as { text?: string })?.text}`);
   console.log("MCP vx_context OK");

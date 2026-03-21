@@ -1,0 +1,80 @@
+{
+  "id": "vx-memory",
+  "name": "VX Memory",
+  "description": "Native VX memory plugin for OpenClaw with durable recall, context packets, and import workflows.",
+  "version": "0.5.2",
+  "skills": [
+    "skills/openclaw/vx-memory"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiBaseUrl": {
+        "type": "string",
+        "default": "https://api.vx.dev/v1",
+        "description": "VX API base URL including /v1."
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "VX API key."
+      },
+      "bearerToken": {
+        "type": "string",
+        "description": "VX bearer token."
+      },
+      "source": {
+        "type": "string",
+        "default": "openclaw",
+        "description": "Source tag stored with VX memories."
+      },
+      "name": {
+        "type": "string",
+        "default": "VX",
+        "description": "Friendly display name used in VX responses."
+      },
+      "storeOnRequestOnly": {
+        "type": "boolean",
+        "default": false,
+        "description": "Only store memory when the user explicitly asks or when the workflow clearly calls for it."
+      },
+      "maxTokens": {
+        "type": "number",
+        "minimum": 1,
+        "default": 4000,
+        "description": "Default token budget for VX context packets."
+      }
+    }
+  },
+  "uiHints": {
+    "apiBaseUrl": {
+      "label": "VX API Base URL",
+      "placeholder": "https://api.vx.dev/v1"
+    },
+    "apiKey": {
+      "label": "VX API Key",
+      "placeholder": "vx_...",
+      "sensitive": true
+    },
+    "bearerToken": {
+      "label": "VX Bearer Token",
+      "placeholder": "vx_...",
+      "sensitive": true
+    },
+    "source": {
+      "label": "Source Tag",
+      "placeholder": "openclaw"
+    },
+    "name": {
+      "label": "Display Name",
+      "placeholder": "VX"
+    },
+    "storeOnRequestOnly": {
+      "label": "Store Only On Request"
+    },
+    "maxTokens": {
+      "label": "Default Context Tokens",
+      "placeholder": "4000"
+    }
+  }
+}

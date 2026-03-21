@@ -115,6 +115,33 @@ export type QueryResponse = {
   total: number;
 };
 
+export type VxKnowledgeContext = {
+  name: string;
+  description?: string;
+  settings?: Record<string, unknown>;
+  scope?: 'private' | 'organization' | 'public' | string;
+  memory_count?: number;
+  memoryCount?: number;
+  created_at?: string;
+  createdAt?: string;
+  updated_at?: string;
+  updatedAt?: string;
+  last_updated?: string;
+  lastUpdated?: string;
+};
+
+export type CreateContextInput = {
+  name: string;
+  description?: string;
+  settings?: Record<string, unknown>;
+  scope?: 'private' | 'organization' | 'public' | string;
+};
+
+export type UpdateContextInput = {
+  description?: string;
+  settings?: Record<string, unknown>;
+};
+
 export type QueryEnvelope = {
   data: QueryResponse;
   meta?: Record<string, unknown>;
@@ -377,7 +404,7 @@ export class VxApiClient {
       metadata?: Record<string, unknown>;
       filename?: string;
     }
-  ): Promise<{ memoryId: string; storageUrl?: string; mediaType: string; merkleHash?: string }> {
+  ): Promise<{ memoryId: string; storageUrl?: string; mediaType: string; hash?: string }> {
     await waitForVxApiInternal(this.baseUrl, getHealthOptions(this.config));
     const url = `${this.baseUrl}/multimodal/upload`;
     const form = new FormData();
@@ -410,7 +437,7 @@ export class VxApiClient {
       throw new Error(`VX API error at /multimodal/upload: ${body.error?.message ?? response.statusText}`);
     }
     const data = (body as { data?: Record<string, unknown> }).data ?? body;
-    return data as { memoryId: string; storageUrl?: string; mediaType: string; merkleHash?: string };
+    return data as { memoryId: string; storageUrl?: string; mediaType: string; hash?: string };
   }
 
   /**
@@ -425,8 +452,8 @@ export class VxApiClient {
       metadata?: Record<string, unknown>;
       filename?: string;
     }>
-  ): Promise<Array<{ memoryId: string; storageUrl?: string; mediaType: string; merkleHash?: string }>> {
-    const results: Array<{ memoryId: string; storageUrl?: string; mediaType: string; merkleHash?: string }> = [];
+  ): Promise<Array<{ memoryId: string; storageUrl?: string; mediaType: string; hash?: string }>> {
+    const results: Array<{ memoryId: string; storageUrl?: string; mediaType: string; hash?: string }> = [];
     for (const item of files) {
       const result = await this.uploadMediaMemory(item.file, {
         mediaType: item.mediaType,
@@ -550,6 +577,47 @@ export class VxApiClient {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  }
+
+  async createContext(input: CreateContextInput): Promise<VxKnowledgeContext> {
+    return this.request<VxKnowledgeContext>('/contexts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async getContext(name: string): Promise<VxKnowledgeContext> {
+    return this.request<VxKnowledgeContext>(`/contexts/${encodeURIComponent(name)}`, {
+      method: 'GET',
+    });
+  }
+
+  async listContexts(params?: {
+    prefix?: string;
+    includeStats?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ contexts: VxKnowledgeContext[]; total: number; limit: number; offset: number }> {
+    const q = new URLSearchParams();
+    if (params?.prefix) q.set('prefix', params.prefix);
+    if (typeof params?.includeStats === 'boolean') {
+      q.set('include_stats', String(params.includeStats));
+    }
+    if (params?.limit != null) q.set('limit', String(params.limit));
+    if (params?.offset != null) q.set('offset', String(params.offset));
+    const path = `/contexts${q.toString() ? `?${q.toString()}` : ''}`;
+    const envelope = await this.requestEnvelope<VxKnowledgeContext[]>(path, { method: 'GET' });
+    const data = envelope.data;
+    const contexts = Array.isArray(data) ? data : [];
+    const meta = (envelope as {
+      meta?: { total?: number; limit?: number; offset?: number };
+    }).meta;
+    return {
+      contexts,
+      total: meta?.total ?? contexts.length,
+      limit: meta?.limit ?? (params?.limit ?? contexts.length),
+      offset: meta?.offset ?? (params?.offset ?? 0),
+    };
   }
 
   async micStore(input: MicStoreInput): Promise<{
