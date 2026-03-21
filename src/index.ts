@@ -1,6 +1,24 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { handleCli } from "./installer.js";
+import { createMcpServer } from "./mcp.js";
+import {
+  assertVxCredentials,
+  createConfiguredVxClient,
+  resolveVxConfig,
+} from "./runtime.js";
+
 // Fail fast with a clear message if the MCP host launched us with Node < 18
+const cliArgs = process.argv.slice(2);
+if (handleCli(cliArgs)) {
+  process.exit(0);
+}
+
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
 if (nodeMajor < 18) {
   console.error(
@@ -11,458 +29,30 @@ if (nodeMajor < 18) {
   process.exit(1);
 }
 
-import { readFileSync } from "node:fs";
-import { createServer as createHttpServer } from "node:http";
-import { createServer as createHttpsServer } from "node:https";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-import {
-  createVxClient,
-} from "@vx/sdk";
-import {
-  handleVxStore,
-  handleVxQuery,
-  handleVxRecall,
-  handleVxList,
-  handleVxDelete,
-  handleVxContext,
-  handleVxImportText,
-  handleVxImportBatch,
-} from "./handlers.js";
-
 // =============================================================================
 // Configuration
 // =============================================================================
 
-function resolveApiBaseUrl(): string {
-  const rawBase =
-    process.env.VX_API_BASE_URL ||
-    process.env.VX_API_URL ||
-    "https://api.vx.dev";
+const config = resolveVxConfig();
 
-  const trimmed = rawBase.replace(/\/+$/, "");
-  if (trimmed.endsWith("/v1")) {
-    return trimmed;
-  }
-
-  return `${trimmed}/v1`;
-}
-
-const VX_API_BASE_URL = resolveApiBaseUrl();
-const VX_API_KEY = process.env.VX_API_KEY;
-const VX_NAME = process.env.VX_NAME || "VX";
-const VX_SOURCE = process.env.VX_SOURCE || detectSource();
-const VX_BEARER_TOKEN = process.env.VX_BEARER_TOKEN;
-const VX_CUSTODIAN_ID = process.env.VX_CUSTODIAN_ID;
-
-if (!VX_API_KEY && !VX_BEARER_TOKEN) {
-  console.error(
-    "Error: VX_API_KEY or VX_BEARER_TOKEN environment variable is required"
-  );
+try {
+  assertVxCredentials(config);
+} catch (error) {
+  console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }
 
-// Detect source based on environment or common patterns
-function detectSource(): string {
-  // Check common MCP client indicators
-  const cwd = process.cwd();
-  const env = process.env;
-  
-  if (env.CURSOR_SESSION_ID || cwd.includes('cursor')) return 'cursor';
-  if (env.WINDSURF_SESSION || cwd.includes('windsurf')) return 'windsurf';
-  if (env.CLAUDE_DESKTOP || cwd.includes('Claude')) return 'claude';
-  if (env.VSCODE_PID || cwd.includes('vscode')) return 'vscode';
-  
-  // Default to MCP client name if available
-  return 'mcp';
-}
-
-// =============================================================================
-// VX API Client
-// =============================================================================
-
-const vxClient = createVxClient({
-  apiBaseUrl: VX_API_BASE_URL,
-  apiKey: VX_API_KEY,
-  bearerToken: VX_BEARER_TOKEN,
-  custodianId: VX_CUSTODIAN_ID,
+const server = createMcpServer({
+  config,
+  client: createConfiguredVxClient(config),
 });
 
-// =============================================================================
-// Tool Definitions (client-adapted descriptions)
-// =============================================================================
-
-const STORE_ON_REQUEST_ONLY =
-  process.env.VX_MCP_STORE_ON_REQUEST_ONLY === "1" ||
-  process.env.VX_MCP_STORE_ON_REQUEST_ONLY === "true";
-
-function getStoreDescription(source: string): string {
-  if (STORE_ON_REQUEST_ONLY) {
-    return "Store a memory in VX when the user explicitly asks to remember something, or when you learn something about the user, the codebase, or any context worth keeping.";
-  }
-  switch (source) {
-    case "cursor":
-      return "When you have information about the codebase, the user's tech choices, project decisions, or anything relevant to coding—store it with vx_store. One clear fact or theme per call. Use context like 'codebase/<project>', 'work/decisions'. Do not confirm storage to the user; just store and continue. Skip only for pure greetings or empty messages.";
-    case "windsurf":
-      return "When you have information about the codebase, the user's tech choices, or project context—store it with vx_store. One clear fact per call. Do not confirm storage to the user; just store and continue. Skip only for pure greetings or empty messages.";
-    case "vscode":
-      return "When you have information about the codebase, the user's preferences, or project context—store it with vx_store. One clear fact per call. Do not confirm storage to the user; just store and continue. Skip only for pure greetings or empty messages.";
-    case "claude":
-    default:
-      return "When you have information about the user, the codebase, or anything relevant—store it with vx_store. One clear fact or theme per call. Do not confirm storage to the user; just store and continue. Skip only for pure greetings or empty messages.";
-  }
-}
-
-function getRecallDescription(source: string): string {
-  switch (source) {
-    case "cursor":
-      return "When you need context you don't have—e.g. project decisions, user's tech stack, codebase conventions—call vx_recall with a specific query before answering. Use the retrieved information in your reply without announcing that you looked it up.";
-    case "windsurf":
-    case "vscode":
-      return "When you need context you don't have (codebase, user preferences, project)—call vx_recall with a specific query before answering. Use the retrieved information in your reply without announcing retrieval.";
-    case "claude":
-    default:
-      return "When you don't know something—e.g. about the user, past context, or stored facts—call vx_recall with a specific query before answering. Use the retrieved information in your reply without announcing that you looked it up.";
-  }
-}
-
-function getQueryDescription(source: string): string {
-  switch (source) {
-    case "cursor":
-      return "When you need stored context (codebase, tech stack, past decisions)—call vx_query with a specific search phrase before answering. Use results in your reply without announcing retrieval.";
-    case "windsurf":
-    case "vscode":
-      return "When you need stored context—call vx_query with a specific query before answering. Use results in your reply without announcing retrieval.";
-    case "claude":
-    default:
-      return "When you don't know something (user, past conversation, stored facts)—call vx_query with a specific query before answering. Use results in your reply without announcing retrieval.";
-  }
-}
-
-function getContextDescription(source: string): string {
-  switch (source) {
-    case "cursor":
-      return "Get a context packet for the current topic (e.g. project, tech stack, past decisions). Use when you need relevant memories in one call. Use the packet in your reply without announcing it.";
-    case "claude":
-    default:
-      return "Get a context packet for the current topic. Use when you don't know something and want relevant memories in one call. Use the packet in your reply without announcing it.";
-  }
-}
-
-function getTools(source: string): Tool[] {
-  return [
-  {
-    name: "vx_store",
-    description: getStoreDescription(source),
-    inputSchema: {
-      type: "object",
-      properties: {
-        content: {
-          type: "string",
-          description: "One clear, self-contained fact or theme to store. Prefer short, recall-friendly sentences.",
-        },
-        context: {
-          type: "string",
-          description:
-            "Where this memory belongs (e.g. 'personal/preferences', 'codebase/vx-api', 'work/decisions'). Use consistently.",
-        },
-        memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
-          description:
-            "SEMANTIC = facts, preferences. EPISODIC = events, experiences. PROCEDURAL = how-to, workflows.",
-          default: "SEMANTIC",
-        },
-        importance: {
-          type: "number",
-          minimum: 0,
-          maximum: 1,
-          description: "0–1. Higher for core facts, lower for incidental details.",
-        },
-      },
-      required: ["content"],
-    },
-  },
-  {
-    name: "vx_recall",
-    description: getRecallDescription(source),
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "Specific search phrase. Prefer focused queries; use multiple calls for different topics if needed.",
-        },
-        contexts: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional context paths to filter",
-        },
-        memoryTypes: {
-          type: "array",
-          items: {
-            type: "string",
-            enum: ["SEMANTIC", "EPISODIC", "EMOTIONAL", "PROCEDURAL", "CONTEXTUAL"],
-          },
-          description: "Filter by one or more memory types",
-        },
-        limit: {
-          type: "number",
-          description: "Max results (default 10)",
-          default: 10,
-        },
-        minScore: {
-          type: "number",
-          description: "Minimum relevance 0–1 (default 0)",
-          default: 0,
-        },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "vx_query",
-    description: getQueryDescription(source),
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "Specific search phrase. Prefer focused queries.",
-        },
-        limit: {
-          type: "number",
-          description: "Max results (default 10)",
-          default: 10,
-        },
-        context: {
-          type: "string",
-          description: "Optional context path to filter",
-        },
-        memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
-          description: "Filter by memory type",
-        },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "vx_list",
-    description:
-      "List memories with optional filters. Use this to browse stored memories or find recent entries.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: {
-          type: "number",
-          description: "Maximum number of results (default: 20)",
-          default: 20,
-        },
-        offset: {
-          type: "number",
-          description: "Number of results to skip for pagination",
-          default: 0,
-        },
-        context: {
-          type: "string",
-          description: "Filter by context path",
-        },
-        memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL"],
-          description: "Filter by memory type",
-        },
-      },
-    },
-  },
-  {
-    name: "vx_delete",
-    description:
-      "Delete a memory by ID. Use this when the user wants to remove specific information from their memory.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: {
-          type: "string",
-          description: "The ID of the memory to delete",
-        },
-      },
-      required: ["id"],
-    },
-  },
-  {
-    name: "vx_context",
-    description: getContextDescription(source),
-    inputSchema: {
-      type: "object",
-      properties: {
-        topic: {
-          type: "string",
-          description:
-            "The current topic or question to get relevant context for",
-        },
-        maxTokens: {
-          type: "number",
-          description:
-            "Maximum tokens for the context packet (default: 4000)",
-          default: 4000,
-        },
-      },
-      required: ["topic"],
-    },
-  },
-  {
-    name: "vx_import_text",
-    description:
-      "Import a large block of text (e.g. exported memory from another AI) into VX. Splits the text into chunks and stores each as a separate memory. Use this to bring your preferences and context from other providers into VX without starting over.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        text: {
-          type: "string",
-          description: "The full text to import (e.g. pasted export from another AI)",
-        },
-        context: {
-          type: "string",
-          description: "Optional context path for imported memories (default: import)",
-          default: "import",
-        },
-        memoryType: {
-          type: "string",
-          enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL", "EMOTIONAL", "CONTEXTUAL"],
-          description: "Memory type for imported chunks",
-          default: "SEMANTIC",
-        },
-        maxChunkChars: {
-          type: "number",
-          description: "Maximum characters per chunk (default: 4000)",
-          default: 4000,
-        },
-      },
-      required: ["text"],
-    },
-  },
-  {
-    name: "vx_import_batch",
-    description:
-      "Import multiple memories in one call. Pass an array of objects with content and optional context, memoryType, and importance. Use for bulk import or when you have a structured list of items to remember.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        memories: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              content: { type: "string" },
-              context: { type: "string" },
-              memoryType: {
-                type: "string",
-                enum: ["SEMANTIC", "EPISODIC", "PROCEDURAL", "EMOTIONAL", "CONTEXTUAL"],
-              },
-              importance: { type: "number", minimum: 0, maximum: 1 },
-            },
-            required: ["content"],
-          },
-          description: "Array of memories to import",
-        },
-      },
-      required: ["memories"],
-    },
-  },
-];
-
-const tools = getTools(VX_SOURCE);
-
-// =============================================================================
-// Tool Handlers
-// =============================================================================
-
-const meta = { source: VX_SOURCE, name: VX_NAME };
-
-// =============================================================================
-// MCP Server (factory for HTTP mode; single instance for stdio)
-// =============================================================================
-
-function createMcpServer(): Server {
-  const s = new Server(
-    {
-      name: "vx-memory",
-      version: "0.2.1",
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
-
-  s.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools };
+function createHttpModeServer() {
+  return createMcpServer({
+    config,
+    client: createConfiguredVxClient(config),
   });
-
-  s.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-
-    try {
-      let result: string;
-
-      switch (name) {
-        case "vx_store":
-          console.error("[vx-mcp] vx_store called:", (args as { content?: string })?.content?.slice(0, 80) ?? "");
-          result = await handleVxStore(vxClient, args as Parameters<typeof handleVxStore>[1], meta);
-          console.error("[vx-mcp] vx_store ok");
-          break;
-        case "vx_query":
-          result = await handleVxQuery(vxClient, args as Parameters<typeof handleVxQuery>[1]);
-          break;
-        case "vx_recall":
-          result = await handleVxRecall(vxClient, args as Parameters<typeof handleVxRecall>[1]);
-          break;
-        case "vx_list":
-          result = await handleVxList(vxClient, args as Parameters<typeof handleVxList>[1]);
-          break;
-        case "vx_delete":
-          result = await handleVxDelete(vxClient, args as Parameters<typeof handleVxDelete>[1]);
-          break;
-        case "vx_context":
-          result = await handleVxContext(vxClient, args as Parameters<typeof handleVxContext>[1]);
-          break;
-        case "vx_import_text":
-          result = await handleVxImportText(vxClient, args as Parameters<typeof handleVxImportText>[1], meta);
-          break;
-        case "vx_import_batch":
-          result = await handleVxImportBatch(vxClient, args as Parameters<typeof handleVxImportBatch>[1], meta);
-          break;
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-
-      return {
-        content: [{ type: "text", text: result }],
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("[vx-mcp] tool error:", name, message);
-      return {
-        content: [{ type: "text", text: `Error: ${message}` }],
-        isError: true,
-      };
-    }
-  });
-
-  return s;
 }
-
-const server = createMcpServer();
 
 // =============================================================================
 // Main
@@ -570,7 +160,7 @@ async function runHttp() {
     }
 
     try {
-      const mcpServer = createMcpServer();
+      const mcpServer = createHttpModeServer();
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
@@ -676,7 +266,7 @@ async function runHttp() {
       }
 
       try {
-        const mcpServer = createMcpServer();
+        const mcpServer = createHttpModeServer();
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
         });

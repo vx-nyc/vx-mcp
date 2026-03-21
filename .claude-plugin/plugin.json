@@ -1,0 +1,16 @@
+{
+  "name": "vx-mcp",
+  "version": "latest",
+  "description": "VX Universal memory for Claude Code with bundled workflow guidance.",
+  "mcpServers": {
+    "vx": {
+      "command": "npx",
+      "args": ["-y", "@vesselnyc/mcp-server@latest", "mcp"],
+      "env": {
+        "VX_API_BASE_URL": "https://api.vx.dev/v1",
+        "VX_NAME": "VX",
+        "VX_SOURCE": "claude-code"
+      }
+    }
+  }
+}

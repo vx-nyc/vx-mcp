@@ -4,6 +4,9 @@ export type {
   CreateMemoriesBatchResponse,
   QueryMemoriesInput,
   ContextPacketInput,
+  VxKnowledgeContext,
+  CreateContextInput,
+  UpdateContextInput,
   MicStoreInput,
   MicInferInput,
   MicContextInput,
@@ -20,4 +23,3 @@ export type { ImportFromTextOptions } from './import.js';
 export { VxApiClient, createVxClient, waitForVxApi } from './vx-client.js';
 
 export { importFromText, importMemories } from './import.js';
-
