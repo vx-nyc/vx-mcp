@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.1] - 2026-03-20
 
 ### Changed
-- Renamed the multimodal upload SDK field to the public-safe `hash`.
 - Updated Claude plugin marketplace copy from "Persistent VX memory" to "VX Universal memory".
 
 ## [0.5.0] - 2026-03-20
